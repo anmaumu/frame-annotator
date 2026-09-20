@@ -1,0 +1,29 @@
+diff --git a/node_modules/app-builder-lib/out/util/electronGet.js b/node_modules/app-builder-lib/out/util/electronGet.js
+index a941f9d..f055662 100644
+--- a/node_modules/app-builder-lib/out/util/electronGet.js
++++ b/node_modules/app-builder-lib/out/util/electronGet.js
+@@ -184,7 +184,23 @@ async function extractArchive(file, dir) {
+             throw new Error(`Extraction of ${path.basename(file)} produced no files`);
+         }
+         await fs.rm(dir, { recursive: true, force: true });
+-        await fs.rename(tmpDir, dir);
++        // Windows: a just-closed executable inside tmpDir can still be briefly
++        // held by antivirus real-time scanning, which makes the parent-dir
++        // rename fail with EPERM even though the write stream already
++        // finished. Retry with backoff instead of failing the whole build.
++        for (let attempt = 1; ; attempt++) {
++            try {
++                await fs.rename(tmpDir, dir);
++                break;
++            }
++            catch (err) {
++                if (attempt >= 10 || !["EPERM", "EBUSY"].includes(err.code)) {
++                    throw err;
++                }
++                builder_util_1.log.warn({ err, attempt }, "rename after extraction failed, retrying");
++                await new Promise(r => setTimeout(r, 500 * attempt));
++            }
++        }
+     }
+     finally {
+         await release().catch(err => builder_util_1.log.warn({ err }, "failed to release lockfile"));
